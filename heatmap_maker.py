@@ -120,8 +120,8 @@ def download_blob(bucket_name, source_blob_name, destination_file_name):
     ) 
 
 #item_idかmdia_idかで実行するsqlを変える
-def sql_selecter(val,num):
-    if val == 'item_id':
+def sql_selecter(c_type,num):
+    if c_type == 'item_id':
         sql1 = "SELECT id as media_id, item_id ,x ,y FROM panorama_user_event t1 \
         JOIN ( SELECT id, mediumable_id FROM nurvecloud.media WHERE mediumable_type = 'Item' ) t2 \
         ON mediumable_id = item_id WHERE item_id ="
@@ -134,6 +134,32 @@ def sql_selecter(val,num):
         sql2 = " AND x IS NOT NULL AND y IS NOT NULL ORDER BY time"
         sql = sql1 + num + sql2
     return sql
+
+#item_idかmdia_idかで実行するsqlを変える上に実行日付から過去一週間分を収集する
+def sq_selecter_with_daterange(c_type,num):
+    dt_now = datetime.datetime.now()
+    today = dt_now.strftime("%Y-%m-%d")
+    if c_type == 'item_id':
+        sql1 = "SELECT id as media_id, item_id ,x ,y FROM panorama_user_event t1 \
+        JOIN ( SELECT id, mediumable_id FROM nurvecloud.media WHERE mediumable_type = 'Item' ) t2 \
+        ON mediumable_id = item_id \
+        WHERE item_id = "
+        sql2 = " AND x IS NOT NULL AND y IS NOT NULL  AND \
+        TD_TIME_RANGE(t1.time, TD_TIME_ADD('"
+        sql3 = today + "','-7d','JST'),'"
+        sql4 = today + "', 'JST')"
+        sql = sql1 + num + sql2 + sql3 + sql4
+    else:
+        sql1 = "SELECT id as media_id, item_id ,x ,y FROM panorama_user_event t1 \
+        JOIN ( SELECT id, mediumable_id FROM nurvecloud.media WHERE mediumable_type = 'Item' ) t2 \
+        ON mediumable_id = item_id \
+        WHERE id = "
+        sql2 = " AND x IS NOT NULL AND y IS NOT NULL  AND \
+        TD_TIME_RANGE(t1.time, TD_TIME_ADD('"
+        sql3 = today + "','-7d','JST'),'"
+        sql4 = today + "', 'JST')"
+        sql = sql1 + num + sql2 + sql3 + sql4        
+    return sql    
 
 #ヒートマップデータ作成
 def data_maker(*axis_data_lst):
@@ -212,7 +238,7 @@ def extension_get(bucket_name,prefix):
         print('ext: {}'.format(extension))
         return extension
     else:
-        False
+        return False
 
 
 # main処理
@@ -224,7 +250,8 @@ def heatmap_maker(val,id):
     engine = td.create_engine('presto:rails_events_production')
 
     # Read Treasure Data query into a DataFrame.
-    sql = sql_selecter(val,id)
+    #sql = sql_selecter(val,id) #全データ
+    sql = sq_selecter_with_daterange(val,id) #期間指定
     df = td.read_td(sql, engine)
     lines = df.values.tolist()
     print('データ取り込み完了')
@@ -289,7 +316,8 @@ def heatmap_maker(val,id):
     prefix = 'medium_items/media/'+media_id + '/'
     ext = extension_get(bucketname,prefix) #拡張子吸い出し
     if not ext:
-        exit() #画像ファイルが無ければ終了
+        #exit() 
+        return False #画像ファイルが無ければ終了
     
     #bucket_name = 'rent-production/medium_items/media/'+media_id
     bucket_name = 'rent-production'
@@ -310,12 +338,14 @@ def heatmap_maker(val,id):
         height = img.shape[0] # Errorを引っ掛けるためだけの仕掛
     except  AttributeError:
         print('file not found. {}'.format(filename))
+        return False
     
+    #サイズが異なる画像が登録されていた場合処理を閉める
     if img.shape[0] == 1024 and img.shape[1] == 2048:
         print('img:{}'.format(img.shape))
     else:
         print('size is diff!')
-        exit()
+        return False
 
     #余白除去後HM読み込み
     filename = './tmp/hm_edge.jpg' # <- dirをつける
@@ -324,6 +354,7 @@ def heatmap_maker(val,id):
         height = img2.shape[0] # Errorを引っ掛けるためだけの仕掛
     except  AttributeError:
         print('file not found.')
+        return False
 
     #サイズ調整
     height = img2.shape[0]
@@ -407,6 +438,7 @@ def heatmap_maker(val,id):
 
     #os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/Users/tani_kyuichiro/nurve-cloud-98b3f-bb7c97f8fb03.json'
 
+    """
     storage_client = google.cloud.storage.Client()
 
     bucket_name = 'rent-heatmap' 
@@ -421,23 +453,51 @@ def heatmap_maker(val,id):
     print('File {} uploaded to {}.'.format(source_file_name,bucket))
     print('GCSへのアップロード完了')
 
-    #---------------------------------------------- ディレクトリ削除 ----------------------------------------------------------------
+    #---------------------------------------------- ディレクトリ削除 -----------------------------------------------
     shutil.rmtree('./medium_items/media/' + media_id)
+    print('dir削除')
+    """
+
+    return True
     
 #---------------------------------- メソッド -------------------------------------------
 def main():
     #コマンド入力
-    args = sys.argv
+    #args = sys.argv
+    #val = args[1]
+    #id = str(args[2])
+    #heatmap_maker(val,id)
 
-    val = args[1]
-    id = str(args[2])
-    #いずれはコマンド入力へ変更
-    #val = 'item_id'
-    #id = '6737846' #item_id
-    #val = 'media_id'
-    #id = '15122174'
-    #media_id = '13106716'
-    heatmap_maker(val,id)
+    dt_now = datetime.datetime.now()
+    today = dt_now.strftime("%Y-%m-%d")
+    
+    #前日に参照されたitem画像の一週間のデータを元にヒートマップ画像を作成
+    sql = "WITH base as (SELECT id as media_id,t1.item_id,mediumable_id,cnt \
+    ,TD_TIME_FORMAT(resent_time,'yyyy-MM-dd HH:mm:ss','JST') as jp_time \
+    FROM \
+    (SELECT item_id,COUNT(*) as cnt FROM panorama_user_event \
+    WHERE TD_TIME_RANGE(time, TD_TIME_ADD('" + today + "','-8d','JST'), '" + today + "', 'JST') \
+    GROUP BY item_id \
+    ORDER BY cnt DESC ) t1 \
+    JOIN \
+    (SELECT id, mediumable_id FROM nurvecloud.media WHERE mediumable_type = 'Item') t2 ON mediumable_id = item_id \
+    JOIN \
+    (SELECT item_id ,MAX(time) OVER(PARTITION BY item_id) as resent_time FROM panorama_user_event WHERE \
+    TD_TIME_RANGE(time, TD_TIME_ADD('" + today + "','-8d','JST'), '" + today + "', 'JST')) t3 \
+    ON t1.item_id = t3.item_id ORDER BY resent_time DESC, cnt DESC) \
+    SELECT DISTINCT * FROM base WHERE cnt > 10 limit 10"
+
+    engine = td.create_engine('presto:rails_events_production')
+
+    # Read Treasure Data query into a DataFrame.
+    df2 = td.read_td(sql, engine)
+    lines2 = df2.values.tolist()
+    for line in lines2:
+        id = str(line[1])
+        check = heatmap_maker('item_id',id)
+        if not check:
+            continue
+    
 
 
 if __name__ == '__main__':
