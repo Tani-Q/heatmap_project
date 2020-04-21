@@ -250,8 +250,8 @@ def heatmap_maker(val,id):
     engine = td.create_engine('presto:rails_events_production')
 
     # Read Treasure Data query into a DataFrame.
-    #sql = sql_selecter(val,id) #全データ
-    sql = sq_selecter_with_daterange(val,id) #期間指定
+    sql = sql_selecter(val,id) #全データ
+    #sql = sq_selecter_with_daterange(val,id) #期間指定
     df = td.read_td(sql, engine)
     lines = df.values.tolist()
     print('データ取り込み完了')
@@ -463,16 +463,16 @@ def heatmap_maker(val,id):
 #---------------------------------- メソッド -------------------------------------------
 def main():
     #コマンド入力
-    #args = sys.argv
-    #val = args[1]
-    #id = str(args[2])
-    #heatmap_maker(val,id)
+    args = sys.argv
+    val = args[1]
+    id = str(args[2])
+    heatmap_maker(val,id)
 
-    dt_now = datetime.datetime.now()
-    today = dt_now.strftime("%Y-%m-%d")
+    #dt_now = datetime.datetime.now()
+    #today = dt_now.strftime("%Y-%m-%d")
     
     #前日に参照されたitem画像の一週間のデータを元にヒートマップ画像を作成
-    sql = "WITH base as (SELECT id as media_id,t1.item_id,mediumable_id,cnt \
+    """sql = "WITH base as (SELECT id as media_id,t1.item_id,mediumable_id,cnt \
     ,TD_TIME_FORMAT(resent_time,'yyyy-MM-dd HH:mm:ss','JST') as jp_time \
     FROM \
     (SELECT item_id,COUNT(*) as cnt FROM panorama_user_event \
@@ -485,7 +485,7 @@ def main():
     (SELECT item_id ,MAX(time) OVER(PARTITION BY item_id) as resent_time FROM panorama_user_event WHERE \
     TD_TIME_RANGE(time, TD_TIME_ADD('" + today + "','-8d','JST'), '" + today + "', 'JST')) t3 \
     ON t1.item_id = t3.item_id ORDER BY resent_time DESC, cnt DESC) \
-    SELECT DISTINCT * FROM base WHERE cnt > 10 limit 10"
+    SELECT DISTINCT * FROM base WHERE cnt > 10 limit 10
 
     engine = td.create_engine('presto:rails_events_production')
 
@@ -496,7 +496,7 @@ def main():
         id = str(line[1])
         check = heatmap_maker('item_id',id)
         if not check:
-            continue
+            continue"""
     
 
 
