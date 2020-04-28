@@ -1,0 +1,9 @@
+pandas
+numpy
+openCV
+Pillow
+Matplotlib
+seaborn
+td-client
+pandas-td
+google-cloud-storage
