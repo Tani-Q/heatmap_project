@@ -273,8 +273,9 @@ def heatmap_maker_json(file,dir_name):
 
 
     #読み込み画像データ設定
-    num = re.search(r'\d+',file)
-    media_id = num.group()
+    num = re.search(r'[\d]+\.json$',file)
+    media_id = num.group().replace('.json','')
+
     item_id =  df_s.loc[0]['item_id']
     organization_group_id =  df_s.loc[0]['organization_group_id']
     lines =  df_s['coordinate'].values.tolist()
@@ -397,7 +398,8 @@ def heatmap_maker_json(file,dir_name):
     im = Image.open(hm_name_sample)
 
     #凡例切り出し&resize
-    im_crop = im.crop((2230,120,2350,1030))
+    #im_crop = im.crop((2230,120,2350,1030))
+    im_crop = im.crop((3150,170,3250,1450)) #2020/04/16 凡例切り出しのズレが生じていたので修正
     im_crop_rsize = im_crop.resize((100,1024))   
     plt.imshow(im_crop_rsize)
     im_crop_rsize.save(dir_name + '/colorbar_crop.jpg', quality=100) # <- dirをつける
