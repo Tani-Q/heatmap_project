@@ -5,6 +5,7 @@ import gzip
 import json
 import math
 import datetime
+import gc
 
 import seaborn as sns
 import pandas as pd
@@ -31,8 +32,7 @@ import shutil
 import tempfile
 
 from flask import escape
-
-os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/Users/tani_kyuichiro/nurve-cloud-98b3f-bb7c97f8fb03.json'
+import time
 
 #-------------------------------- メソッド -------------------------------------
 
@@ -143,6 +143,10 @@ def margin_cut(file_name='./hm.jpg',output_name='./hm_edge.png'):
     crop_img = img2[y1_min:y2_max, x1_min:x2_max]
     cv2.imwrite(output_name, crop_img)
 
+    #画像メモリ開放     # 2020/5/13追加
+    del crop_img
+    gc.collect()
+
 #GCSからの画像データダウンロード
 def download_blob(bucket_name, source_blob_name, destination_file_name):
     """Downloads a blob from the bucket."""
@@ -155,12 +159,13 @@ def download_blob(bucket_name, source_blob_name, destination_file_name):
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(source_blob_name)
     blob.download_to_filename(destination_file_name)
-
+    """
     print(
         "Blob {} downloaded to {}.".format(
             source_blob_name, destination_file_name
         )
     ) 
+    """
 
 
 #データ量計測
@@ -245,7 +250,7 @@ def extension_get(bucket_name,prefix):
 
     if len(l_in) > 0:
         extension = l_in[0].replace(target,'')
-        print('ext: {}'.format(extension))
+        #print('ext: {}'.format(extension))
         return extension
     else:
         return False
@@ -270,25 +275,32 @@ def list_blobs(bucket_name):
 #jsonで処理するタイプ    
 def heatmap_maker_json(file,dir_name):
     #-----------------------------------  json処理  -------------------------------------------------
-    
+    #print('read json.')
     df_s = pd.read_json(file)
 
 
     #読み込み画像データ設定
+    #print('check media_id.')
     num = re.search(r'[\d]+\.json$',file)
     media_id = num.group().replace('.json','')
 
-    item_id =  df_s.loc[0]['item_id']
-    organization_group_id =  df_s.loc[0]['organization_group_id']
+    #jsonファイル削除     # 2020/5/13追加
+    os.remove(file)
+
+    #item_id =  df_s.loc[0]['item_id']
+    #organization_group_id =  df_s.loc[0]['organization_group_id']
     lines =  df_s['coordinate'].values.tolist()
     
+    #df削除     # 2020/5/13追加
+    del df_s
+    gc.collect()
     
     """#読み込み画像データ設定
     line = lines[0]
     file = str(int(line[1])) #item_id
     media_id = str(int(line[0])) #media_id"""
 
-    print('item_id:{}/media_id:{}'.format(item_id,media_id))
+    #print('media_id:{}'.format(media_id))
 
     #------------------------------ データ作成 -------------------------------------
     #座標補正処理 Ver02
@@ -298,11 +310,11 @@ def heatmap_maker_json(file,dir_name):
     for line in lines:    
         data = corrected_data_json(line) #座標補正
         axis_data_lst.append(data)
-    print('座標補正完了')
+    #print('座標補正完了')
 
     #ヒートマップデータ作成Ver02
     lst_2d = data_maker(*axis_data_lst)
-    print('ヒートマップデータ作成完了')
+    #print('ヒートマップデータ作成完了')
 
     #---------------------------------- ヒートマップ作成 ---------------------------------------------
     # vのレンジ幅の調整
@@ -318,22 +330,31 @@ def heatmap_maker_json(file,dir_name):
     sns.heatmap(lst_2d,vmin=0, vmax=v_max)
     #sns.heatmap(lst_2d,vmin=0, vmax=5)
     plt.savefig(hm_name_sample )
-    print('凡例付きヒートマップ作成完了')
+    #print('凡例付きヒートマップ作成完了')
+
+    # 2020/5/13追加
+    plt.close()
+    gc.collect()
 
     #合成用ヒートマップ作成
     hm_name = dir_name + "/hm.png" #<- dirをつける
     plt.figure(figsize=(32,16)) 
     sns.heatmap(lst_2d,vmin=0, vmax=v_max,yticklabels=False,xticklabels=False,cbar=False)
     plt.savefig(hm_name)
-    print('合成用ヒートマップ作成完了')
+    #print('合成用ヒートマップ作成完了')
+    
+    # 2020/5/13追加
+    plt.close()
+    gc.collect()
 
     #HM余白削除
     outfile = dir_name + '/hm_edge.png'
     #outfile = margin_cut(hm_name,outfile)
     margin_cut(hm_name,outfile)
-    print('余白削除処理完了')
+    #print('余白削除処理完了')
 
-    """#--- ここからオミット対象 ---
+    
+    #--- ここからオミット対象 ---
     #------------------------------------- GCSからの画像データ読み込み -------------------------------------------------
     #直接画像読み込み
     #ファイルの存在確認、拡張子取得
@@ -341,6 +362,7 @@ def heatmap_maker_json(file,dir_name):
     prefix = 'medium_items/media/'+media_id + '/'
     ext = extension_get(bucketname,prefix) #拡張子吸い出し
     if not ext:
+        print('拡張子なし')
         return False
     
     #bucket_name = 'rent-production/medium_items/media/'+media_id
@@ -353,7 +375,7 @@ def heatmap_maker_json(file,dir_name):
         print('file not found. {}'.format(source_blob_name))
         return False
         
-    print('オリジナル画像読み込み完了')
+    #print('オリジナル画像読み込み完了')
 
     #----------------------------------------- 画像処理 ------------------------------------------------------------
     #画像データ読み込み
@@ -364,7 +386,14 @@ def heatmap_maker_json(file,dir_name):
     except  AttributeError:
         print('file not found. {}'.format(filename))
         return False
-    #--- ここまでオミット対象 ---"""
+
+    #オリジナル画像のリサイズ
+    height = img.shape[0]
+    width = img.shape[1]
+    if height != 1024 or width != 2048:
+        img = cv2.resize(img , (int(width*(2048.5/width)), int(height*(1024.5/height))))
+    #--- ここまでオミット対象 ---
+    
 
     #余白除去後HM読み込み
     filename = dir_name + '/hm_edge.png' # <- dirをつける
@@ -379,23 +408,33 @@ def heatmap_maker_json(file,dir_name):
     width = img2.shape[1]
 
     img2_1 = cv2.resize(img2 , (int(width*(2048/width)), int(height*(1024/height))))
-    #print(img2_1.shape)
+    #print('orgサイズ:{}'.format(img.shape))
+    #print('リサイズhm:{}'.format(img2_1.shape))
     cv2.imwrite(dir_name + '/resize_heatmap.png', img2_1)
-    print('ヒートマップのサイズ調整完了')
+    #print('ヒートマップのサイズ調整完了')
 
-    """#--- ここから機能オミット ---
+    
+    #--- ここから機能オミット ---
     #画像合成
     blended = cv2.addWeighted(src1=img,alpha=0.6,src2=img2_1,beta=0.4,gamma=0.3)
 
     #合成後画像保存
     cv2.imwrite(dir_name + '/blended_test.jpg', blended) # <- dirをつける
-    print('合成画像作成完了')
-    #--- ここまで機能オミット ---"""
+    #print('合成画像作成完了')
 
+    # 2020/5/13追加
+    del img2
+    del img2_1
+    del blended
+    gc.collect()
+    #--- ここまで機能オミット ---
+    
+    """
     #半透明画像作成
     im_rgb = Image.open(dir_name + '/resize_heatmap.png')
     im_rgb.putalpha(128)
     im_rgb.save(dir_name + '/pillow_putalpha_solid.png')
+    """
 
     #凡例切り出し準備
     im = Image.open(hm_name_sample)
@@ -404,11 +443,18 @@ def heatmap_maker_json(file,dir_name):
     #im_crop = im.crop((2230,120,2350,1030))
     im_crop = im.crop((3150,170,3250,1450)) #2020/04/16 凡例切り出しのズレが生じていたので修正
     im_crop_rsize = im_crop.resize((100,1024))   
-    plt.imshow(im_crop_rsize)
+    #plt.imshow(im_crop_rsize)
     im_crop_rsize.save(dir_name + '/colorbar_crop.jpg', quality=100) # <- dirをつける
-    print('凡例作成完了')
+    #print('凡例作成完了')
 
-    """#--- ここから機能オミット ---
+    # 2020/5/13追加
+    del im
+    del im_crop
+    del im_crop_rsize
+    gc.collect()
+
+    
+    #--- ここから機能オミット ---
     #ブランク画像作成
     height = 1024
     width = 2200
@@ -416,7 +462,7 @@ def heatmap_maker_json(file,dir_name):
     blank += 255 #←全ゼロデータに255を足してホワイトにする
  
     cv2.imwrite(dir_name + '/blank.jpg',blank) # <- dirをつける
-    print('ベース画像作成完了')
+    #print('ベース画像作成完了')
 
 
     #凡例付きヒートマップ作成
@@ -456,17 +502,23 @@ def heatmap_maker_json(file,dir_name):
 
     #cv2.imwrite(dir_file_name,base_img)
     cv2.imwrite(media_dir,base_img)
-    print('凡例付き合成画像作成完了')
-    #--- ここまで機能オミット ---"""
+    #print('凡例付き合成画像作成完了')
+    #--- ここまで機能オミット ---
     
-    """#--- ここから機能オミット ---
+    #--- ここから機能オミット ---
     #合成ヒートマップ画像アップローダー
+    #- 本番環境設定 -
+    #bucket_name = 'rent-production'
+    #destination_blob_name = 'reports/heat_maps/hm/media/' + media_id + '/heatmap.jpg' 
+ 
+
     bucket_name = "heatmap-staging" #<- 将来的には本番環境へ変更
     source_file_name = media_dir # 凡例付き合成画像
-    destination_blob_name = 'medium_items/media/' + media_id + '/heatmap.jpg'
+    destination_blob_name = 'medium_items/hm/media/' + media_id + '/heatmap.jpg'
     upload_blob(bucket_name, source_file_name, destination_blob_name) #画像データアップロード
-    #--- ここまで機能オミット ---"""
+    #--- ここまで機能オミット ---
 
+    """
     #半透明ヒートマップ画像アップローダー
     #bucket_name = "rent-production" #"heatmap-staging" #<- 将来的には本番環境へ変更
     bucket_name = "heatmap-staging"
@@ -480,15 +532,15 @@ def heatmap_maker_json(file,dir_name):
     source_file_name = dir_name + '/colorbar_crop.jpg' # 凡例画像
     destination_blob_name = 'medium_items/hm/media/' + media_id + '/colorbar_crop.jpg'
     upload_blob(bucket_name, source_file_name, destination_blob_name) #画像データアップロード
-
+    """
     #作成画像削除
     os.remove(dir_name + "/hm_org.jpg")
     os.remove(dir_name + "/hm.png")
     os.remove(dir_name + '/hm_edge.png')
-    os.remove(dir_name + '/2048x1024.jpg')
-    #os.remove(dir_name + '/blended_test.jpg') # オミット対象 
+    os.remove(dir_name + '/2048x1024.jpg') # オミット対象
+    os.remove(dir_name + '/blended_test.jpg') # オミット対象 
     os.remove(dir_name + '/resize_heatmap.png')
-    os.remove(dir_name + '/pillow_putalpha_solid.png')
+    #os.remove(dir_name + '/pillow_putalpha_solid.png')
     os.remove(dir_name + '/colorbar_crop.jpg') 
     #os.remove(dir_name + '/blank.jpg') # オミット対象
     #os.remove(media_dir) # オミット対象
@@ -498,7 +550,7 @@ def heatmap_maker_json(file,dir_name):
     
 #GCSへのデータアップローダー    
 def upload_blob(bucket_name, source_file_name, destination_blob_name):
-        """Uploads a file to the bucket."""
+        #Uploads a file to the bucket.
         # bucket_name = "your-bucket-name"
         # source_file_name = "local/path/to/file"
         # destination_blob_name = "storage-object-name"
@@ -508,12 +560,13 @@ def upload_blob(bucket_name, source_file_name, destination_blob_name):
         blob = bucket.blob(destination_blob_name)
 
         blob.upload_from_filename(source_file_name)
-
+        """
         print(
             "File {} uploaded to {}.".format(
                 source_file_name, destination_blob_name
             )
         )
+        """
 
 def down_blob(bucket_name,source_blob_name,file_name):
         #------------------------------------- GCSからの画像データ読み込み -------------------------------------------------
@@ -537,7 +590,7 @@ def down_blob(bucket_name,source_blob_name,file_name):
         print('file not found. {}'.format(source_blob_name))
         return False
         
-    print('オリジナル画像読み込み完了')
+    #print('オリジナル画像読み込み完了')
     
 #バケット内のオブジェクトリスト取得
 def list_blobs(bucket_name):
@@ -568,49 +621,83 @@ def main(request):
     if not loop_check(data):
         sys.exit(1)"""
     #media_id受取
+    #print('受信開始')
     request_json = request.get_json(silent=True)
     request_args = request.args
 
     if request_json and 'data' in request_json:
-        media_id = request_json['data']
+        media_ids = request_json['data']
+        cnt = request_json['cnt']
+        lcnt = request_json['lcnt']
     elif request_args and 'data' in request_args:
-        media_id = request_args['data']
+        media_ids = request_args['data']
+        cnt = request_json['cnt']
+        lcnt = request_json['lcnt']
     else:
-        media_id = False
-        return escape(media_id)
+        media_ids = False
+        return escape(media_ids)  
 
     #ディレクトリ準備
-    print('Dir作成')
+    #print('Dir作成')
     tmpdir = tempfile.TemporaryDirectory()
     dir_name = tmpdir.name
-"""
+    """
     #media_idのファイル名リスト作成
     blobs_lst = list_blobs('heatmap-staging')
     json_lst = []
     for blob in blobs_lst:
         if re.search(r'medium_items/media/[0-9]+/heatmap\.json',blob):
             json_lst.append(blob)
-"""
+    """
+
     #blobからjsonファイル取得してヒートマップ作成
     #for json in json_lst:
     #json = data['name']
     #num = re.search(r'\d+',json)
     #media_id = num.group()
+    #bucket_name = 'rent-production' #'heatmap-staging'
     bucket_name = 'heatmap-staging'
-    source_blob_name = 'medium_items/media/' +media_id + '/heatmap.json'
-    #source_blob_name = json
-    file_name = dir_name + '/' + media_id + '.json'
-    #blobからjsonファイル取得
-    download_blob(bucket_name,source_blob_name,file_name)
+    #source_blob_name = 'reports/heat_maps/media/' + media_id + '/coordinate.json' #'medium_items/media/' +media_id + '/heatmap.json'
     
-    #ヒートマップ作成
-    heatmap_maker_json(file_name,dir_name)
+    #------- debug -------
+    test_lst = [14687738, 16287716, 13809236, 13808540, 13809014, 16376628, 14688089] 
+    #------- debug -------  
+    llcnt = 1
+    for media_id in media_ids:
+        if media_id == '':
+            continue
+        #debug
+        if media_id in test_lst:
+            print('----- Hit!!---- {}'.format(media_id))
+        #debug
+        
+        source_blob_name = 'medium_items/media/' +str(media_id) + '/heatmap.json'
+
+        #source_blob_name = json
+        file_name = dir_name + '/' + str(media_id) + '.json'
+        #blobからjsonファイル取得
+        #print('json取得開始')
+        download_blob(bucket_name,source_blob_name,file_name)
     
-    os.remove(file_name) #json削除
+        #ヒートマップ作成
+        #print('ヒートマップ作成開始')
+        #print('m_id:{}'.format(media_id))
+        heatmap_maker_json(file_name,dir_name)
+    
+        #os.remove(file_name) #json削除 #2020/5/13 機能停止
+        
+        #print('cnt:{}/lcnt:{}/llcnt:{}'.format(cnt,lcnt,llcnt))
+        
+        if len(media_ids) <= llcnt:
+            print('cnt:{}/lcnt:{}/llcnt:{}/mcnt:{}'.format(cnt,lcnt,llcnt,len(media_ids)))
+            if len(media_ids) < 60:
+                print('--cnt:{}/lcnt:{}/llcnt:{}/mcnt:{}'.format(cnt,lcnt,llcnt,len(media_ids)))
+            return escape(media_id)
+        
+        time.sleep(1)
+        llcnt += 1
 
     tmpdir.cleanup() #仮想dir削除
 
-    #return escape(media_id)
+    #return escape(media_ids)
 
-if __name__ == '__main__':
-    main()

@@ -1,0 +1,6 @@
+seaborn
+pandas
+opencv-python
+pillow
+google-cloud-storage
+flask
